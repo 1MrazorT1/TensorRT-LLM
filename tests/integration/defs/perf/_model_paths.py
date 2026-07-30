@@ -44,6 +44,8 @@ MODEL_PATH_DICT = {
     "gemma_3_12b_it": "gemma/gemma-3-12b-it",
     "gemma_3_12b_it_fp8": "gemma/gemma-3-12b-it-fp8",
     "gemma_3_12b_it_fp4": "gemma/gemma-3-12b-it-fp4",
+    "gemma_3_1b_it": "gemma/gemma-3-1b-it",
+    "gemma_4_26b_a4b_nvfp4": "gemma/nvidia-Gemma-4-26B-A4B-NVFP4",
     "deepseek_r1_fp8": "DeepSeek-R1/DeepSeek-R1",
     "deepseek_r1_nvfp4": "DeepSeek-R1/DeepSeek-R1-FP4",
     "deepseek_r1_0528_fp8": "DeepSeek-R1/DeepSeek-R1-0528/",
@@ -97,6 +99,8 @@ MODEL_PATH_DICT = {
     "kimi_k2_nvfp4": "Kimi-K2-Thinking-NVFP4",
     # MiniMax M2.5 (FP8 block-scale, ~230B MoE)
     "minimax_m2.5_fp8": "MiniMax-M2.5",
+    # MiniMax M3 (block-sparse MoE, MXFP8 weights, BF16 activations + KV cache)
+    "minimax_m3_mxfp8": "MiniMax-M3-MXFP8",
     # Qwen3.5 dense + MoE
     "qwen3.5_9b": "Qwen3.5-9B",
     "qwen3.5_27b": "Qwen3.5-27B",
@@ -104,9 +108,16 @@ MODEL_PATH_DICT = {
     "qwen3.5_122b_a10b": "Qwen3.5-122B-A10B",
     "qwen3.5_397b_a17b_fp8": "Qwen3.5-397B-A17B-FP8",
     "qwen3.5_397b_a17b_fp4": "Qwen3.5-397B-A17B-NVFP4",
+    # Qwen3.6 (GDN linear-attn MoE, NVFP4)
+    "qwen3.6_35b_a3b_fp4": "Qwen3.6-35B-A3B-NVFP4",
     # DeepSeek V3.2 (671B MoE)
     "deepseek_v3.2_fp8": "DeepSeek-V3.2-hf",
     "deepseek_v3.2_fp4": "DeepSeek-V3.2-NVFP4",
+    # DeepSeek V4
+    "deepseek_v4_pro_fp4": "DeepSeek-V4-Pro",
+    "deepseek_v4_flash": "DeepSeek-V4-Flash",
+    "deepseek_v4_flash_base_fp8": "DeepSeek-V4-Flash-Base",
+    "deepseek_v4_pro_dspark": "DeepSeek-V4-Pro-DSpark",
     # GLM-5 FP8 (MoE)
     "glm_5_fp8": "GLM-5-FP8",
     # Kimi K2.5 NVFP4 (~1T MoE multimodal)
@@ -123,16 +134,9 @@ MODEL_PATH_DICT = {
     "glm_5_nvfp4": "GLM-5-NVFP4",
 }
 
-# Model PATH of HuggingFace
+# Models loaded directly by HuggingFace repo id (downloaded at runtime, not synced locally).
 HF_MODEL_PATH = {
-    "llama_v3.1_8b_hf": "meta-llama/Llama-3.1-8B",
-    "llama_v3.1_8b_instruct_hf": "nvidia/Llama-3.1-8B-Instruct-FP8",
-    "llama_v3.1_nemotron_nano_8b_hf": "nvidia/Llama-3.1-Nemotron-Nano-8B-v1",
-    "llama_v3.1_nemotron_nano_8b_fp8_hf": "nvidia/Llama-3.1-Nemotron-Nano-8B-v1-FP8",
-    "llama_v3.3_nemotron_super_49b_hf": "nvidia/Llama-3_3-Nemotron-Super-49B-v1",
-    "llama_v3.3_nemotron_super_49b_fp8_hf": "nvidia/Llama-3_3-Nemotron-Super-49B-v1-FP8",
-    "llama_v3.1_nemotron_ultra_253b_fp8_hf": "nvidia/Llama-3_1-Nemotron-Ultra-253B-v1-FP8",
-    "phi_4_mini_instruct_hf": "microsoft/Phi-4-mini-instruct",
+    "nemotron_3_ultra_550b_nvfp4": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
 }
 
 LORA_MODEL_PATH = {

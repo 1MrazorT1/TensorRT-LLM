@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 # Generate slurm_launch.sh for a local disaggregated perf-sanity run
 # and submit it via sbatch. Run this on a SLURM login node.
 #
@@ -67,6 +69,7 @@ source "$config_file"
 : "${build_wheel_flag:=}"
 : "${capture_nsys_flag:=}"
 : "${time_limit:=02:00:00}"
+: "${cluster_name:=}"
 
 # Normalize test list: prefer 'test_ids' bash array if set, else fall back to
 # legacy single 'test_id'. Either declares a non-empty list at this point.
@@ -174,28 +177,36 @@ fi
 # Default strip list — see note inside the loop.
 : "${strip_sbatch_opts:=--segment}"
 
-# Per-test loop: each test gets its own subdir (when >1), its own slurm_launch.sh,
-# and its own sbatch submission. Failures are collected, not fatal, so a bad
-# test_id doesn't stop the rest of the batch.
+# Per-test loop: each test gets its own subdir (named by the test-id bracket),
+# its own slurm_launch.sh, and its own sbatch submission. Failures are collected,
+# not fatal, so a bad test_id doesn't stop the rest of the batch.
 num_tests=${#test_ids[@]}
 submitted_count=0
 failed_tests=()
 
+# CI machine-readable bookkeeping (consumed by trt_jenkins gen_disagg_junit.py).
+# expected_tests.txt : every test_id we intend to run (for expected-vs-produced diff)
+# failed_submit.txt  : test_id|reason for submit-time failures (no job / no xml)
+# slurm_jobs.txt     : <jobid>|<test_id> for jobs that submitted (Jenkins polls these)
+failed_submit_file="$work_dir/failed_submit.txt"
+slurm_jobs_file="$work_dir/slurm_jobs.txt"
+expected_file="$work_dir/expected_tests.txt"
+: > "$failed_submit_file"; : > "$slurm_jobs_file"; : > "$expected_file"
+printf '%s\n' "${test_ids[@]}" > "$expected_file"
+
 for idx in "${!test_ids[@]}"; do
     tid="${test_ids[$idx]}"
 
-    # When running a single test, keep the flat layout (back-compat); for
-    # multi-test, drop each into its own subdir named by a slug of the test id.
-    if [[ $num_tests -gt 1 ]]; then
-        slug="${tid#*[}"      # strip everything up to and including '['
-        slug="${slug%]*}"     # strip trailing ']' and beyond
-        slug="${slug//[^a-zA-Z0-9_.-]/_}"
-        test_work_dir="$work_dir/$(printf '%02d_%s' "$idx" "$slug")"
-        test_job_name="${job_name}_${idx}"
-    else
-        test_work_dir="$work_dir"
-        test_job_name="$job_name"
-    fi
+    # Each test gets its own subdir named by the test-id bracket content, e.g.
+    # 'disagg-e2e-<stem>' / 'aggr-ctx_only-<stem>'. This matches the trtllm-ci
+    # multinode layout so downstream perf parsing (parse_perf_logs.py discover_cases,
+    # which keys off 'disagg-*' / 'aggr-*' dir names + test_list.txt) and JUnit
+    # generation find cases uniformly. submit.py writes test_list.txt + report.xml
+    # into --work-dir (this subdir), so we don't create test_list.txt ourselves.
+    case_name="${tid#*[}"       # strip up to and including '['
+    case_name="${case_name%]*}" # strip trailing ']' and beyond
+    test_work_dir="$work_dir/$case_name"
+    test_job_name="${job_name}_${idx}"
     mkdir -p "$test_work_dir"
 
     echo
@@ -223,11 +234,13 @@ for idx in "${!test_ids[@]}"; do
         --mounts "$mounts" \
         --llm-models-root "$llm_models_path" \
         --time "$time_limit" \
+        ${cluster_name:+--cluster-name "$cluster_name"} \
         "${install_args[@]}" \
         $build_wheel_flag \
         $capture_nsys_flag; then
         echo "ERROR: submit.py failed for $tid — skipping." >&2
         failed_tests+=("$tid (submit.py failed)")
+        echo "$tid|submit_py_failed" >> "$failed_submit_file"
         continue
     fi
 
@@ -244,12 +257,17 @@ for idx in "${!test_ids[@]}"; do
         rm -f "$test_work_dir/slurm_launch.sh.bak"
     fi
 
-    # 2. Submit
-    if ( cd "$test_work_dir" && sbatch slurm_launch.sh ); then
+    # 2. Submit — capture job id, do NOT block (Jenkins polls squeue/sacct later, so a
+    #    long queue wait survives SSH drops; --wait would hang one ssh for hours).
+    jid_raw=$( cd "$test_work_dir" && sbatch --parsable slurm_launch.sh 2>>"$work_dir/sbatch.err" || true )
+    jid="${jid_raw%%;*}"   # 'jobid' or 'jobid;cluster' -> jobid
+    if [[ "$jid" =~ ^[0-9]+$ ]]; then
+        echo "$jid|$tid" >> "$slurm_jobs_file"
         submitted_count=$((submitted_count + 1))
     else
         echo "ERROR: sbatch failed for $tid" >&2
         failed_tests+=("$tid (sbatch failed)")
+        echo "$tid|sbatch_failed" >> "$failed_submit_file"
     fi
 done
 

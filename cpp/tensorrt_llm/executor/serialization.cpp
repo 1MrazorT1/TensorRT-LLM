@@ -17,6 +17,7 @@
 
 #include "tensorrt_llm/executor/serialization.h"
 #include "tensorrt_llm/batch_manager/kvCacheManager.h"
+#include "tensorrt_llm/common/tllmDataType.h"
 #include "tensorrt_llm/executor/dataTransceiverState.h"
 #include "tensorrt_llm/executor/executor.h"
 #include "tensorrt_llm/executor/requestImpl.h"
@@ -626,8 +627,8 @@ kv_cache::CacheState Serialization::deserializeCacheState(std::istream& is)
     auto hasRnnConfig = su::deserialize<bool>(is);
     std::optional<CacheState::RnnModelConfig> rnnModelConfig;
     std::vector<SizeType32> rnnLayerNumPerPP;
-    nvinfer1::DataType convStateDataType{nvinfer1::DataType::kFLOAT};
-    nvinfer1::DataType ssmStateDataType{nvinfer1::DataType::kFLOAT};
+    tensorrt_llm::DataType convStateDataType{tensorrt_llm::DataType::kFLOAT};
+    tensorrt_llm::DataType ssmStateDataType{tensorrt_llm::DataType::kFLOAT};
     if (hasRnnConfig)
     {
         CacheState::RnnModelConfig rnnCfg;
@@ -641,8 +642,8 @@ kv_cache::CacheState Serialization::deserializeCacheState(std::istream& is)
         rnnCfg.mNumHeads = su::deserialize<decltype(CacheState::RnnModelConfig::mNumHeads)>(is);
         rnnCfg.mConvSectionLayout
             = static_cast<CacheState::RnnModelConfig::ConvSectionLayout>(su::deserialize<SizeType32>(is));
-        convStateDataType = su::deserialize<nvinfer1::DataType>(is);
-        ssmStateDataType = su::deserialize<nvinfer1::DataType>(is);
+        convStateDataType = su::deserialize<tensorrt_llm::DataType>(is);
+        ssmStateDataType = su::deserialize<tensorrt_llm::DataType>(is);
         rnnLayerNumPerPP = su::deserialize<std::vector<SizeType32>>(is);
         rnnModelConfig = std::move(rnnCfg);
     }
@@ -764,6 +765,8 @@ DataTransceiverState Serialization::deserializeDataTransceiverState(std::istream
     {
         state.setCacheState(std::move(cacheState).value());
     }
+    auto isArbitraryTransferState = su::deserialize<decltype(DataTransceiverState::mIsArbitraryTransferState)>(is);
+    state.setIsArbitraryTransferState(isArbitraryTransferState);
     return state;
 }
 
@@ -771,6 +774,7 @@ void Serialization::serialize(DataTransceiverState const& state, std::ostream& o
 {
     su::serialize(state.mCommState, os);
     su::serialize(state.mCacheState, os);
+    su::serialize(state.mIsArbitraryTransferState, os);
 }
 
 std::vector<char> Serialization::serialize(DataTransceiverState const& state)
@@ -789,6 +793,7 @@ size_t Serialization::serializedSize(DataTransceiverState const& state)
     size_t totalSize = 0;
     totalSize += su::serializedSize(state.mCommState);
     totalSize += su::serializedSize(state.mCacheState);
+    totalSize += su::serializedSize(state.mIsArbitraryTransferState);
     return totalSize;
 }
 
@@ -885,8 +890,8 @@ Request Serialization::deserializeRequest(std::istream& is)
     auto allottedTimeMs = allottedTimeInt
         ? std::optional<std::chrono::milliseconds>(std::chrono::milliseconds(*allottedTimeInt))
         : std::nullopt;
-    auto cacheSaltID = su::deserialize<std::optional<CacheSaltIDType>>(is);
     auto disaggRequestId = su::deserialize<std::optional<IdType>>(is);
+    auto cacheSalt = su::deserialize<std::optional<std::string>>(is);
 
     return Request(std::move(inputTokenIds), maxNewTokens, streaming, samplingConfig, outputConfig, endId, padId,
         std::move(positionIds), std::move(badWords), std::move(stopWords), std::move(embeddingBias),
@@ -896,7 +901,7 @@ Request Serialization::deserializeRequest(std::istream& is)
         std::move(encoderInputTokenIds), clientId, returnAllGeneratedTokens, priority, requestType,
         std::move(contextPhaseParams), std::move(encoderInputFeatures), encoderOutputLength,
         std::move(crossAttentionMask), numReturnSequences, std::move(eagleConfig), std::move(skipCrossAttnBlocks),
-        std::move(guidedDecodingParams), languageAdapterUid, allottedTimeMs, cacheSaltID, disaggRequestId);
+        std::move(guidedDecodingParams), languageAdapterUid, allottedTimeMs, disaggRequestId, std::move(cacheSalt));
 }
 
 void Serialization::serialize(Request const& request, std::ostream& os)
@@ -1427,7 +1432,9 @@ SchedulerConfig Serialization::deserializeSchedulerConfig(std::istream& is)
     auto capacitySchedulerPolicy = su::deserialize<CapacitySchedulerPolicy>(is);
     auto contextChunkingPolicy = su::deserialize<std::optional<ContextChunkingPolicy>>(is);
     auto dynamicBatchConfig = su::deserialize<std::optional<DynamicBatchConfig>>(is);
-    return SchedulerConfig{capacitySchedulerPolicy, contextChunkingPolicy, dynamicBatchConfig};
+    auto enablePrefixAwareScheduling = su::deserialize<bool>(is);
+    return SchedulerConfig{
+        capacitySchedulerPolicy, contextChunkingPolicy, dynamicBatchConfig, enablePrefixAwareScheduling};
 }
 
 void Serialization::serialize(SchedulerConfig const& schedulerConfig, std::ostream& os)
@@ -1435,6 +1442,7 @@ void Serialization::serialize(SchedulerConfig const& schedulerConfig, std::ostre
     su::serialize(schedulerConfig.getCapacitySchedulerPolicy(), os);
     su::serialize(schedulerConfig.getContextChunkingPolicy(), os);
     su::serialize(schedulerConfig.getDynamicBatchConfig(), os);
+    su::serialize(schedulerConfig.getEnablePrefixAwareScheduling(), os);
 }
 
 size_t Serialization::serializedSize(SchedulerConfig const& schedulerConfig)
@@ -1443,6 +1451,7 @@ size_t Serialization::serializedSize(SchedulerConfig const& schedulerConfig)
     totalSize += su::serializedSize(schedulerConfig.getCapacitySchedulerPolicy());
     totalSize += su::serializedSize(schedulerConfig.getContextChunkingPolicy());
     totalSize += su::serializedSize(schedulerConfig.getDynamicBatchConfig());
+    totalSize += su::serializedSize(schedulerConfig.getEnablePrefixAwareScheduling());
     return totalSize;
 }
 
@@ -1453,7 +1462,9 @@ CacheTransceiverConfig Serialization::deserializeCacheTransceiverConfig(std::ist
     auto maxTokensInBuffer = su::deserialize<std::optional<size_t>>(is);
     auto kvTransferTimeoutMs = su::deserialize<std::optional<int>>(is);
     auto kvTransferSenderFutureTimeoutMs = su::deserialize<std::optional<int>>(is);
-    return CacheTransceiverConfig{backendType, maxTokensInBuffer, kvTransferTimeoutMs, kvTransferSenderFutureTimeoutMs};
+    auto kvTransferPollIntervalMs = su::deserialize<std::optional<int>>(is);
+    return CacheTransceiverConfig{
+        backendType, maxTokensInBuffer, kvTransferTimeoutMs, kvTransferSenderFutureTimeoutMs, kvTransferPollIntervalMs};
 }
 
 void Serialization::serialize(CacheTransceiverConfig const& cacheTransceiverConfig, std::ostream& os)
@@ -1462,6 +1473,7 @@ void Serialization::serialize(CacheTransceiverConfig const& cacheTransceiverConf
     su::serialize(cacheTransceiverConfig.getMaxTokensInBuffer(), os);
     su::serialize(cacheTransceiverConfig.getKvTransferTimeoutMs(), os);
     su::serialize(cacheTransceiverConfig.getKvTransferSenderFutureTimeoutMs(), os);
+    su::serialize(cacheTransceiverConfig.getKvTransferPollIntervalMs(), os);
 }
 
 size_t Serialization::serializedSize(CacheTransceiverConfig const& cacheTransceiverConfig)
@@ -1471,6 +1483,7 @@ size_t Serialization::serializedSize(CacheTransceiverConfig const& cacheTranscei
     totalSize += su::serializedSize(cacheTransceiverConfig.getMaxTokensInBuffer());
     totalSize += su::serializedSize(cacheTransceiverConfig.getKvTransferTimeoutMs());
     totalSize += su::serializedSize(cacheTransceiverConfig.getKvTransferSenderFutureTimeoutMs());
+    totalSize += su::serializedSize(cacheTransceiverConfig.getKvTransferPollIntervalMs());
     return totalSize;
 }
 
@@ -2517,6 +2530,7 @@ size_t Serialization::serializedSize(KVCacheStoredBlockData const& data)
     totalSize += su::serializedSize(data.cacheLevel);
     totalSize += su::serializedSize(data.priority);
     totalSize += su::serializedSize(data.mmKeys);
+    totalSize += su::serializedSize(data.cacheSalt);
     return totalSize;
 }
 
@@ -2528,6 +2542,7 @@ void Serialization::serialize(KVCacheStoredBlockData const& data, std::ostream& 
     su::serialize(data.cacheLevel, os);
     su::serialize(data.priority, os);
     su::serialize(data.mmKeys, os);
+    su::serialize(data.cacheSalt, os);
 }
 
 KVCacheStoredBlockData Serialization::deserializeKVCacheStoredBlockData(std::istream& is)
@@ -2538,8 +2553,9 @@ KVCacheStoredBlockData Serialization::deserializeKVCacheStoredBlockData(std::ist
     auto cacheLevel = su::deserialize<SizeType32>(is);
     auto priority = su::deserialize<SizeType32>(is);
     auto mmKeys = su::deserialize<std::vector<tensorrt_llm::batch_manager::kv_cache_manager::MmKey>>(is);
+    auto cacheSalt = su::deserialize<std::optional<std::string>>(is);
 
-    return KVCacheStoredBlockData{blockHash, tokens, loraId, cacheLevel, priority, mmKeys};
+    return KVCacheStoredBlockData{blockHash, tokens, loraId, cacheLevel, priority, mmKeys, cacheSalt};
 }
 
 // KVcacheRemovedData
@@ -2686,7 +2702,7 @@ size_t Serialization::serializedSize(tensorrt_llm::batch_manager::kv_cache_manag
     totalSize += su::serializedSize(key.uniqueTokens);
     // std::vector<MmKey> where MmKey is pair<std::array<uint8_t,32>, SizeType32>
     totalSize += su::serializedSize(key.extraKeys);
-    totalSize += su::serializedSize(key.cacheSaltID);
+    totalSize += su::serializedSize(key.cacheSalt);
     return totalSize;
 }
 
@@ -2696,7 +2712,7 @@ void Serialization::serialize(tensorrt_llm::batch_manager::kv_cache_manager::Blo
     su::serialize(key.loraTaskId, os);
     su::serialize(key.uniqueTokens, os);
     su::serialize(key.extraKeys, os);
-    su::serialize(key.cacheSaltID, os);
+    su::serialize(key.cacheSalt, os);
 }
 
 tensorrt_llm::batch_manager::kv_cache_manager::BlockKey Serialization::deserializeBlockKey(std::istream& is)
@@ -2705,13 +2721,13 @@ tensorrt_llm::batch_manager::kv_cache_manager::BlockKey Serialization::deseriali
     auto loraTaskId = su::deserialize<std::optional<tensorrt_llm::batch_manager::kv_cache_manager::LoraTaskIdType>>(is);
     auto uniqueTokens = su::deserialize<std::vector<tensorrt_llm::runtime::UniqueToken>>(is);
     auto extraKeys = su::deserialize<std::vector<tensorrt_llm::batch_manager::kv_cache_manager::MmKey>>(is);
-    auto cacheSaltID = su::deserialize<std::optional<CacheSaltIDType>>(is);
+    auto cacheSalt = su::deserialize<std::optional<std::string>>(is);
     tensorrt_llm::batch_manager::kv_cache_manager::BlockKey key;
     key.usesExtraIds = usesExtraIds;
     key.loraTaskId = std::move(loraTaskId);
     key.uniqueTokens = std::move(uniqueTokens);
     key.extraKeys = std::move(extraKeys);
-    key.cacheSaltID = std::move(cacheSaltID);
+    key.cacheSalt = std::move(cacheSalt);
     return key;
 }
 

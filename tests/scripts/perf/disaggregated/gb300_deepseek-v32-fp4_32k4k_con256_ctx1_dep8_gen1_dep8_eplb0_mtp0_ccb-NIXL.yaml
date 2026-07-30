@@ -70,6 +70,8 @@ worker_config:
     cache_transceiver_config:
       max_tokens_in_buffer: 120000
       backend: NIXL
+      transceiver_runtime: PYTHON
+      kv_transfer_timeout_ms: 600000
     num_postprocess_workers: 8
     stream_interval: 10
   ctx:
@@ -97,3 +99,5 @@ worker_config:
     cache_transceiver_config:
       max_tokens_in_buffer: 120000
       backend: NIXL
+      transceiver_runtime: PYTHON
+      kv_transfer_timeout_ms: 600000

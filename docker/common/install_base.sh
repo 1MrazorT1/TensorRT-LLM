@@ -95,6 +95,10 @@ init_ubuntu() {
     wget \
     pigz \
     libzmq3-dev
+  # WAR against CVE-2026-45447: upgrade OpenSSL runtime libraries
+  apt-get install -y --no-install-recommends \
+    libssl3t64=3.0.13-0ubuntu3.11 \
+    openssl=3.0.13-0ubuntu3.11
   if ! command -v mpirun &> /dev/null; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openmpi-bin libopenmpi-dev
   fi
@@ -102,7 +106,14 @@ init_ubuntu() {
   # PEP 668: Allow break system packages for ubuntu24.04,
   # and ubuntu22.04 (currently not used) shouldn't be affected.
   pip3 config set global.break-system-packages true
-  pip3 install --ignore-installed pip setuptools wheel
+  pip3 install pip wheel
+  # WAR: pin setuptools<80; setuptools>=80 breaks `python setup_library.py develop`
+  # used by cutlass. Use --ignore-installed to avoid failing on system setuptools
+  # that lack a RECORD file (installed via apt without pip metadata).
+  pip3 install --ignore-installed "setuptools<80"
+  # WAR: uninstall dependencies that has vulnerability or need upgrading.
+  # pip and wheel are already installed to /usr/local/ above, so removing
+  # the apt packages leaves pip3 functional.
 
   echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> "${ENV}"
   # Remove previous TRT installation
